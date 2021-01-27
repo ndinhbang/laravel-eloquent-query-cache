@@ -64,7 +64,8 @@ trait QueryCacheModule
     /**
      * Get the cache from the current query.
      *
-     * @param  array  $columns
+     * @param  string       $method
+     * @param  array        $columns
      * @param  string|null  $id
      * @return array
      */
@@ -79,11 +80,27 @@ trait QueryCacheModule
         $callback = $this->getQueryCacheCallback($method, $columns, $id);
         $time = $this->getCacheTime();
 
-        if ($time instanceof DateTime || $time > 0) {
-            return $cache->remember($key, $time, $callback);
+        $cacheConnection = $cache->connection();
+
+        $value = $cacheConnection->get($cache->getPrefix().$key);
+        // If the item exists in the cache we will just return this immediately and if
+        // not we will execute the given Closure and cache the result of that for a
+        // given number of seconds so it's available for all subsequent requests.
+        if (! is_null($value)) {
+            return json_decode($value);
         }
 
-        return $cache->rememberForever($key, $callback);
+        $value = $callback();
+        // remember with expired time
+        if ($time instanceof DateTime || $time > 0) {
+            $cacheConnection->setex(
+                $cache->getPrefix().$key, (int) max(1, $time), json_encode($value)
+            );
+            return $value;
+        }
+        // remember forever
+        $cacheConnection->setex($cache->getPrefix().$key, json_encode($value));
+        return $value;
     }
 
     /**
